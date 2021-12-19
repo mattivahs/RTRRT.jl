@@ -1,0 +1,13 @@
+name = "RTRRT"
+uuid = "41c281e0-cf5c-4256-af8b-1099b91c9329"
+authors = ["Matti Vahs"]
+version = "0.1.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+julia = "1"
+
+[targets]
+test = ["Test"]
