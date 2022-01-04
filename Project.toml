@@ -4,6 +4,7 @@ authors = ["Matti Vahs"]
 version = "0.1.0"
 
 [deps]
+CSFML = "538df835-4bef-5bfa-b281-4025a4f7e8ff"
 GeometryTypes = "4d00f742-c7ba-57c2-abde-4428a4b178cb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"

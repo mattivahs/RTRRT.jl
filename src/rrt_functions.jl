@@ -72,10 +72,8 @@ function near_nodes(this::Tree, node)
 end
 
 function expansion(this::Tree)
-    i = 0
     start_time = time()
     while size(this.all_nodes, 1) <= this.params.max_tree_nodes
-        println("Iteration $i")
         sampled_pos = sample_point(this.params)
         # dist_, closest_ind = findmin(map(x->norm(this.all_nodes[x].pose[1:2] - sampled_pos), 1:size(this.all_nodes, 1)))
         # Nearest node obtained through KD Tree
@@ -116,16 +114,13 @@ function expansion(this::Tree)
             end
 
             push!(this.QrPrior, size(this.all_nodes, 1))
-            i += 1
         end
     end
 end
 
 function rewire(this::Tree)
     start_time = time()
-    i = 0
     while !(isempty(this.QrPrior) && isempty(this.Qr)) #&& (time() - start_time) <= this.params.RewireTime
-        println("Rewire Iteration $i")
         if !isempty(this.QrPrior)
             rewire_ind = pop!(this.QrPrior)
         else
@@ -153,7 +148,6 @@ function rewire(this::Tree)
                 propagate_costs(this, node_id)
             end
         end
-        i += 1
     end
 end
 
@@ -163,9 +157,7 @@ function rewire_from_root(this::Tree)
     if isempty(this.Qs)
         enqueue!(this.Qs, 1)
     end
-    i = 0
-    while !isempty(this.Qs) #&& (time() - start_time) <= this.params.RewireTime
-        println("Rewire From Root ITERATION $i")
+    while !isempty(this.Qs) && (time() - start_time) <= this.params.RewireTime
         rewire_ind = dequeue!(this.Qs)
 
         # nearnodes = near_nodes(this.all_nodes, this.all_nodes[rewire_ind], this.params.gamma)
@@ -193,7 +185,6 @@ function rewire_from_root(this::Tree)
                 propagate_costs(this, node_id)
             end
         end
-        i += 1
     end
 end
 
@@ -204,7 +195,6 @@ function propagate_costs(this::Tree, id::Int64)
             # Update own costs
             this.all_nodes[child_id].totalcost = this.all_nodes[id].totalcost + this.all_nodes[child_id].edge_cost
             propagate_costs(this, child_id)
-            println("PRPAGATING COST")
         end
     end
 end
@@ -227,4 +217,59 @@ end
 function update_kdtree(this::Tree)
     this.positions = cat(this.positions, this.all_nodes[end].pose[1:2], dims=2)
     this.kdtree = KDTree(this.positions)
+end
+
+function extract_goal_path(this::Tree)
+    closest_ind, dist_ = knn(this.kdtree, this.current_goal, 1)
+    ind = closest_ind[1]
+
+    goal_path = []
+    while true
+        push!(goal_path, this.all_nodes[ind].pose)
+        if this.all_nodes[ind].parent_id == 0
+            break
+        end
+        ind = this.all_nodes[ind].parent_id
+    end
+    return goal_path
+end
+
+function update_root_node(this::Tree, dx::Float64, dy::Float64)
+    new_pose = this.all_nodes[1].pose + [dx, dy, 0]
+    new_pose[1] = clamp(new_pose[1], this.params.x_range[1], this.params.x_range[2])
+    new_pose[2] = clamp(new_pose[2], this.params.y_range[1], this.params.y_range[2])
+    if !edge_collision(this.map, this.all_nodes[1].pose[1:2], new_pose[1:2])
+        this.all_nodes[1].pose = new_pose
+        this.positions[:, 1] = new_pose[1:2]
+        this.kdtree = KDTree(this.positions)
+
+        # change costs of root node children and propagate
+        for node_id in this.all_nodes[1].child_ids
+            if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[1].pose[1:2])
+                change_parent(this, node_id, 1)
+                propagate_costs(this, node_id)
+            else
+                # Assign very high cost to colliding node
+                this.all_nodes[node_id].totalcost = Inf
+
+                # Propagate to avoid cycles in tree
+                propagate_costs(this, node_id)
+                nearnode_ids = near_nodes(this, this.all_nodes[node_id])
+
+                for node_id_ in nearnode_ids
+                    c_new = this.all_nodes[node_id_].totalcost + calc_edge_cost(this.all_nodes[node_id_].pose, this.all_nodes[node_id].pose)
+
+                    if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[node_id_].pose[1:2]) && c_new < this.all_nodes[node_id].totalcost
+                        change_parent(this, node_id, node_id_)
+                        propagate_costs(this, node_id)
+                        break
+                    end
+                end
+            end
+
+        end
+
+        empty!(this.Qs)
+        this.passcode = rand()
+    end
 end

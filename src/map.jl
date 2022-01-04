@@ -1,4 +1,3 @@
-include("helper_functions.jl")
 include("obstacles.jl")
 
 mutable struct PlanningMap
