@@ -105,8 +105,6 @@ function process_events(tree)
         end
     end
     if has_changed
-        println("DX: $dx")
-        println("DY: $dy")
         RTRRT.update_root_node(tree, dx, dy)
     end
 end
@@ -129,7 +127,7 @@ RTRRT.rewire_from_root(tree)
 # SFML initialization[2.0, 3.5]
 mode = sfVideoMode(1280, 720, 32)
 
-window = sfRenderWindow_create(mode, "SFML window", sfResize | sfClose, C_NULL)
+window = sfRenderWindow_create(mode, "RT-RRT*", sfResize | sfClose, C_NULL)
 
 # Root node marker
 root_node_marker = sfCircleShape_create()
@@ -157,7 +155,6 @@ sfVertexArray_setPrimitiveType(goal_path, sfLines)
 # Obstacles
 obstacle_shapes = []
 for obst in tree.map.all_obstacles
-    println(length(obst.points))
     if length(obst.points) == 2
         points = []
         if obst.p1[1] < obst.p2[1]
@@ -180,7 +177,6 @@ for obst in tree.map.all_obstacles
     push!(obstacle_shapes, sfConvexShape_create())
     sfConvexShape_setPointCount(obstacle_shapes[end], length(points))
     for (i, point) in enumerate(points)
-        println(CoordsToPixel(point, params))
         sfConvexShape_setPoint(
             obstacle_shapes[end],
             i - 1,
@@ -230,7 +226,6 @@ while Bool(sfRenderWindow_isOpen(window))
     # Get mouse position
     mouse_pos = sfMouse_getPosition(window)
     tree.current_goal = PixelToCoords(mouse_pos, tree.params)
-    println(tree.current_goal)
     path_circles = update_goal_path(goal_path, tree)
 
     sfRenderWindow_drawVertexArray(window, edges, C_NULL)
