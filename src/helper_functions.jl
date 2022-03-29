@@ -48,7 +48,17 @@ function plot_tree(tree)
     plot!([tree[1].pose[1]], [tree[1].pose[2]], marker=(:circle,5), legend=false, color="red")
 end
 
-function intersected_cells(points::Vector{Vector{Float64}}, params::parameters)
+function plot_goal_path(goal_path)
+    x_data = []
+    y_data = []
+    for i = 1:(length(goal_path) - 1)
+        push!(x_data, [goal_path[i][1], goal_path[i+1][1]])
+        push!(y_data, [goal_path[i][2], goal_path[i+1][2]])
+    end
+    plot!(x_data, y_data, marker=(:circle,2), legend=false, color="red")
+end
+
+function intersected_cells(points, params::parameters)
     # Min point p1, max point x2
     min_x = params.x_range[2]
     max_x = params.x_range[1]
@@ -73,4 +83,43 @@ function intersected_cells(points::Vector{Vector{Float64}}, params::parameters)
         push!(occ_cells, [i, j])
     end
     return occ_cells
+end
+
+function ConstructInequalitiesFromPoints(points)
+    # Points need to be defined in clockwise order
+    A = zeros(length(points), 2)
+    b = zeros(length(points))
+
+    for i = 1:(length(points))
+        if i == length(points)
+            j = 1
+        else
+            j = i + 1
+        end
+
+        p1 = points[i]
+        p2 = points[j]
+
+        dx = p2[1] - p1[1]
+        if abs(dx) <= 0.0001
+            j == length(points) ? next_ind = 1 : next_ind = j + 1
+            next_dx = points[next_ind][1] - p2[1]
+            A[i, 1], A[i, 2] = 1, 0
+            b[i] = p1[1]
+            if next_dx > 0
+                A[i, 1] *= -1
+                b[i] *= -1
+            end
+        else
+            A[i, 2] = 1
+            A[i, 1] = -(p2[2] - p1[2]) / (p2[1] - p1[1])
+            b[i] = (A[i, 1] * p1[1] + p1[2])
+        end
+        if dx < 0 && abs(dx) > 0.0001
+            A[i, 2] *= -1
+            A[i, 1] *= -1
+            b[i] *= -1
+        end
+    end
+    return A, b
 end

@@ -22,14 +22,14 @@ struct line_obstacle <: obstacle
     end
 end
 
-struct convex_polygon <: obstacle
+mutable struct convex_polygon <: obstacle
     id::Int64
     # Points are defined such that clockwise connection defines the polygon
-    points::Vector{Vector{Float64}}
+    points
     occupied_cells::Vector{Vector{Int64}}
     lines::Vector{LineSegment{Point{2, Float32}}}
 
-    function convex_polygon(id::Int64, points::Vector{Vector{Float64}}, params::parameters)
+    function convex_polygon(id::Int64, points, params::parameters)
         length(points) < 3 ? throw(DomainError("Polygon must have at least 3 points")) : nothing
         occupied_cells = intersected_cells(points, params)
         lines = LineSegment{Point{2, Float32}}[]
@@ -62,4 +62,43 @@ function plot_obstacle(this::T) where {T <: obstacle}
     push!(y_data, this.points[1][2])
 
     plot!(x_data, y_data, legend=false, color="blue")
+end
+
+function inflate_obstacle(this::T, t::Float64, params) where {T <: obstacle}
+    edges = []
+    for i = 1:(length(this.points) - 1)
+        push!(edges, this.points[i + 1] - this.points[i])
+    end
+    push!(edges, this.points[1] - this.points[end])
+    println(edges)
+    perp_vecs = []
+    for edge in edges
+        push!(perp_vecs, [- edge[2], edge[1]])
+    end
+
+    new_vertices = []
+    for (i, p) in enumerate(this.points)
+        d1 = perp_vecs[i]
+        if i == 1
+            d2 = perp_vecs[end]
+        else
+            d2 = perp_vecs[i - 1]
+        end
+        d = 0.5 * (d1 + d2)
+        new_p = p + t * (d / norm(d))
+        push!(new_vertices, new_p)
+    end
+    this.points = new_vertices
+    this.occupied_cells = intersected_cells(this.points, params)
+
+    this.lines = LineSegment{Point{2, Float32}}[]
+    for i = 1:(length(this.points)-1)
+        push!(this.lines, LineSegment(Point2f0(this.points[i][1], this.points[i][2]), Point2f0(this.points[i+1][1], this.points[i+1][2])))
+    end
+    push!(this.lines, LineSegment(Point2f0(this.points[end][1], this.points[end][2]), Point2f0(this.points[1][1], this.points[1][2])))
+end
+
+function in_polygon(this::T, pos) where {T <: obstacle}
+    A, b = ConstructInequalitiesFromPoints(this.points)
+    return all([transpose(A[i, :]) * pos ≤ b[i] for i = 1:length(b)])
 end

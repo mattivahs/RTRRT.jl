@@ -28,7 +28,7 @@ mutable struct Tree
         kdtree = KDTree(init_pose[1:2])
         positions = init_pose[1:2]
         map = PlanningMap(params)
-        load_default_map(map, params)
+        # load_default_map(map, params)
         new(init_pose, params, [1, 1], [root_node], QrPrior, Qr, Qs, passcode, positions, kdtree, map)
     end
 end
@@ -49,9 +49,13 @@ mutable struct TreeNode
     child_ids::Vector{Int64}
     "Passcode (has already been processed in rewire from root?)"
     passcode::Float64
+    "Attribute to check if node is in obstacle"
+    in_obstacle::Bool
+    "To prevent cycles"
+    path_ids::Vector{Int}
 
     function TreeNode(id::Int64, pose::Vector{Float64}, parent_id::Int)
-        new(id, pose, parent_id, 0, 0, [], 0)
+        new(id, pose, parent_id, 0, 0, [], 0, false, [id])
     end
 end
 
@@ -64,9 +68,8 @@ function steer(closest::TreeNode, pos::Vector{Float64}, params::parameters)
     return new_pose
 end
 
-function near_nodes(this::Tree, node)
+function near_nodes(this::Tree, node, r=this.params.gamma)
     "Naive Implementation, KD Trees will follow"
-    r = 0.8
     nearnode_ids = inrange(this.kdtree, node.pose[1:2], r)
     return nearnode_ids
 end
@@ -87,6 +90,7 @@ function expansion(this::Tree)
             new_node.edge_cost = calc_edge_cost(this.all_nodes[closest_ind].pose, new_pose)
             new_node.totalcost = this.all_nodes[closest_ind].totalcost + new_node.edge_cost
             push!(this.all_nodes[new_node.parent_id].child_ids, new_node.id)
+            new_node.path_ids = push!(copy(this.all_nodes[new_node.parent_id].path_ids), new_node.id)
 
             # nearnodes = near_nodes(this.all_nodes, new_node, this.params.gamma)
             nearnode_ids = near_nodes(this, new_node)
@@ -126,26 +130,33 @@ function rewire(this::Tree)
         else
             rewire_ind = dequeue!(this.Qr)
         end
-        # nearnodes = near_nodes(this.all_nodes, this.all_nodes[rewire_ind], this.params.gamma)
-        nearnode_ids = near_nodes(this, this.all_nodes[rewire_ind])
-        # Boolean value for changing parent
-        parent_changed = false
 
-        for node_id in nearnode_ids
-            # New costs when changing parent
-            c_new = this.all_nodes[rewire_ind].totalcost + calc_edge_cost(this.all_nodes[rewire_ind].pose, this.all_nodes[node_id].pose)
+        if !this.all_nodes[rewire_ind].in_obstacle
+            # nearnodes = near_nodes(this.all_nodes, this.all_nodes[rewire_ind], this.params.gamma)
+            nearnode_ids = near_nodes(this, this.all_nodes[rewire_ind])
+            # Boolean value for changing parent
+            parent_changed = false
 
-            # update parent
-            if c_new < this.all_nodes[node_id].totalcost
-                if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[rewire_ind].pose[1:2])
-                    change_parent(this, node_id, rewire_ind)
-                    parent_changed = true
-                    enqueue!(this.Qr, node_id)
+            for node_id in nearnode_ids
+                if !this.all_nodes[node_id].in_obstacle
+                    if !(node_id in this.all_nodes[rewire_ind].path_ids)
+                        # New costs when changing parent
+                        c_new = this.all_nodes[rewire_ind].totalcost + calc_edge_cost(this.all_nodes[rewire_ind].pose, this.all_nodes[node_id].pose)
+
+                        # update parent
+                        if c_new < this.all_nodes[node_id].totalcost
+                            if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[rewire_ind].pose[1:2])
+                                change_parent(this, node_id, rewire_ind)
+                                parent_changed = true
+                                enqueue!(this.Qr, node_id)
+                            end
+                        end
+
+                        if parent_changed
+                            propagate_costs(this, node_id)
+                        end
+                    end
                 end
-            end
-
-            if parent_changed
-                propagate_costs(this, node_id)
             end
         end
     end
@@ -160,29 +171,35 @@ function rewire_from_root(this::Tree)
     while !isempty(this.Qs) && (time() - start_time) <= this.params.RewireTime
         rewire_ind = dequeue!(this.Qs)
 
-        # nearnodes = near_nodes(this.all_nodes, this.all_nodes[rewire_ind], this.params.gamma)
-        nearnode_ids = near_nodes(this, this.all_nodes[rewire_ind])
+        if !this.all_nodes[rewire_ind].in_obstacle
+            # nearnodes = near_nodes(this.all_nodes, this.all_nodes[rewire_ind], this.params.gamma)
+            nearnode_ids = near_nodes(this, this.all_nodes[rewire_ind])
 
-        for node_id in nearnode_ids
-            # New costs when changing parent
-            c_new = this.all_nodes[rewire_ind].totalcost + calc_edge_cost(this.all_nodes[rewire_ind].pose, this.all_nodes[node_id].pose)
+            for node_id in nearnode_ids
+                if !this.all_nodes[node_id].in_obstacle
+                    if !(node_id in this.all_nodes[rewire_ind].path_ids)
+                        # New costs when changing parent
+                        c_new = this.all_nodes[rewire_ind].totalcost + calc_edge_cost(this.all_nodes[rewire_ind].pose, this.all_nodes[node_id].pose)
 
-            parent_changed = false
-            # update parent
-            if c_new < this.all_nodes[node_id].totalcost
-                if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[rewire_ind].pose[1:2])
-                    change_parent(this, node_id, rewire_ind)
-                    parent_changed = true
+                        parent_changed = false
+                        # update parent
+                        if c_new < this.all_nodes[node_id].totalcost
+                            if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[rewire_ind].pose[1:2])
+                                change_parent(this, node_id, rewire_ind)
+                                parent_changed = true
+                            end
+                        end
+                        if this.all_nodes[node_id].passcode != this.passcode
+                            enqueue!(this.Qs, node_id)
+                            this.all_nodes[node_id].passcode = this.passcode
+                        end
+
+                        if parent_changed
+                            # Propagate costs
+                            propagate_costs(this, node_id)
+                        end
+                    end
                 end
-            end
-            if this.all_nodes[node_id].passcode != this.passcode
-                enqueue!(this.Qs, node_id)
-                this.all_nodes[node_id].passcode = this.passcode
-            end
-
-            if parent_changed
-                # Propagate costs
-                propagate_costs(this, node_id)
             end
         end
     end
@@ -191,6 +208,9 @@ end
 function propagate_costs(this::Tree, id::Int64)
     # Recursion
     if !isempty(this.all_nodes[id].child_ids)
+        if this.all_nodes[id].in_obstacle
+            this.all_nodes[id].totalcost = 1000
+        end
         for child_id in this.all_nodes[id].child_ids
             # Update own costs
             this.all_nodes[child_id].totalcost = this.all_nodes[id].totalcost + this.all_nodes[child_id].edge_cost
@@ -206,6 +226,8 @@ function change_parent(this::Tree, node_id, new_parent_id)
     this.all_nodes[node_id].edge_cost = calc_edge_cost(this.all_nodes[new_parent_id].pose, this.all_nodes[node_id].pose)
     this.all_nodes[node_id].totalcost = this.all_nodes[new_parent_id].totalcost + this.all_nodes[node_id].edge_cost
     push!(this.all_nodes[new_parent_id].child_ids, node_id)
+    # update path ids
+    this.all_nodes[node_id].path_ids = push!(copy(this.all_nodes[new_parent_id].path_ids), node_id)
 end
 
 function update_costs(this::Tree, node_id::Int64)
@@ -222,6 +244,9 @@ end
 function extract_goal_path(this::Tree)
     closest_ind, dist_ = knn(this.kdtree, this.current_goal, 1)
     ind = closest_ind[1]
+    c = this.all_nodes[ind].totalcost
+    println("Total Path cost: $c")
+    println(this.all_nodes[ind].path_ids)
 
     goal_path = []
     while true
@@ -231,7 +256,7 @@ function extract_goal_path(this::Tree)
         end
         ind = this.all_nodes[ind].parent_id
     end
-    return goal_path
+    return reverse(goal_path)
 end
 
 function update_root_node(this::Tree, dx::Float64, dy::Float64)
@@ -272,4 +297,70 @@ function update_root_node(this::Tree, dx::Float64, dy::Float64)
         empty!(this.Qs)
         this.passcode = rand()
     end
+end
+
+function rewire_single_node(this::Tree, id::Int)
+
+    found_new_parent = false
+    r = copy(this.params.gamma)
+    while !found_new_parent
+        println("Search radius : $r")
+        nearnode_ids = near_nodes(this, this.all_nodes[id], r)
+        println(nearnode_ids)
+        for node_id in nearnode_ids
+            if !this.all_nodes[node_id].in_obstacle
+                if !(node_id in this.all_nodes[id].path_ids)
+                    # New costs when changing parent
+                    c_new = this.all_nodes[id].totalcost + calc_edge_cost(this.all_nodes[id].pose, this.all_nodes[node_id].pose)
+
+                    parent_changed = false
+                    # update parent
+                    if c_new < this.all_nodes[node_id].totalcost
+                        if !edge_collision(this.map, this.all_nodes[node_id].pose[1:2], this.all_nodes[id].pose[1:2])
+                            change_parent(this, node_id, id)
+                            parent_changed = true
+                            enqueue!(this.Qr, node_id)
+                        end
+                    end
+
+                    if parent_changed
+                        # Propagate costs
+                        propagate_costs(this, node_id)
+                        found_new_parent = true
+                    end
+                end
+            end
+        end
+        # increase rewiring radius
+        r *= 1.5
+    end
+end
+
+function minkowski_sum_obstacle(this::Tree, id::Int, t::Float64)
+    inflate_obstacle(this.map, this.map.all_obstacles[id], t)
+    for node in this.all_nodes
+        if node.parent_id ≠ 0
+                if in_polygon(this.map.all_obstacles[id], node.pose[1:2])
+                    node.in_obstacle = true
+                    node.totalcost = 100
+                    propagate_costs(this, node.id)
+                    enqueue!(this.Qr, node.id)
+                    # for child_id in node.child_ids
+                    #     rewire_single_node(this, child_id)
+                    # end
+                else
+                    node.in_obstacle = false
+                    if edge_collision(this.map, node.pose[1:2], this.all_nodes[node.parent_id].pose[1:2])
+                        node.totalcost = 100
+                        propagate_costs(this, node.id)
+                        # rewire_single_node(this, node.id)
+                        enqueue!(this.Qr, node.id)
+                    end
+                end
+        end
+    end
+    rewire(this)
+    empty!(this.Qs)
+    this.passcode = rand()
+    rewire_from_root(this)
 end

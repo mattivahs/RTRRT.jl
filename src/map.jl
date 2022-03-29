@@ -27,6 +27,21 @@ function add_obstacle(this::PlanningMap, obst::obstacle)
     end
 end
 
+function inflate_obstacle(this::PlanningMap, obst::obstacle, t::Float64)
+    # remove old ids
+    for ids in obst.occupied_cells
+        filter!(x->x≠obst, this.obstacle_grid[ids[1], ids[2]])
+    end
+
+    inflate_obstacle(obst, t, this.params)
+    # update ids
+    for ids in obst.occupied_cells
+        if !(obst in this.obstacle_grid[ids[1], ids[2]])
+            push!(this.obstacle_grid[ids[1], ids[2]], this.all_obstacles[obst.id])
+        end
+    end
+end
+
 function load_default_map(this::PlanningMap, params::parameters)
     obstacles = Vector{obstacle}()
     line_obst1 = line_obstacle(1, [5.1, 0.0], [5.15, 5.0], params)

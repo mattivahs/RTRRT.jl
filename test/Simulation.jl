@@ -103,6 +103,12 @@ function process_events(tree)
             dy -= delta
             has_changed = true
         end
+
+        if Bool(sfKeyboard_isKeyPressed(sfKeyK))
+            RTRRT.minkowski_sum_obstacle(tree, 3, 0.01)
+        elseif Bool(sfKeyboard_isKeyPressed(sfKeyL))
+            RTRRT.minkowski_sum_obstacle(tree, 3, -0.01)
+        end
     end
     if has_changed
         RTRRT.update_root_node(tree, dx, dy)
@@ -113,9 +119,10 @@ end
 # RT RRT* initialization
 init_pose = [0.5, 2.0, 0]
 params =
-    RTRRT.parameters(1.0, [0.0, 10.0], [0.0, 10.0], 5000, 0.4, 0.1, 0.1, 20)
+    RTRRT.parameters(1.5, [0.0, 10.0], [0.0, 10.0], 2000, 0.4, 0.3, 0.3, 20)
 
 tree = RTRRT.Tree(init_pose, params)
+RTRRT.load_default_map(tree.map, params)
 
 RTRRT.expansion(tree)
 # RTRRT.rewire(tree)
@@ -219,8 +226,54 @@ while Bool(sfRenderWindow_isOpen(window))
         ),
     )
 
+    # Obstacles
+    empty!(obstacle_shapes)
+    for obst in tree.map.all_obstacles
+        if length(obst.points) == 2
+            points = []
+            if obst.p1[1] < obst.p2[1]
+                p1 = obst.p1
+                p2 = obst.p2
+            else
+                p1 = obst.p2
+                p2 = obst.p1
+            end
+            d = (p2 - p1) / norm(p2 - p1)
+            delta = 0.02
+            S(x) = [cos(x) sin(x); -sin(x) cos(x)]
+            push!(points, p1 - delta * S(pi / 2) * d)
+            push!(points, p1 + delta * S(pi / 2) * d)
+            push!(points, p2 + delta * S(pi / 2) * d)
+            push!(points, p2 - delta * S(pi / 2) * d)
+        else
+            points = obst.points
+        end
+        push!(obstacle_shapes, sfConvexShape_create())
+        sfConvexShape_setPointCount(obstacle_shapes[end], length(points))
+        for (i, point) in enumerate(points)
+            sfConvexShape_setPoint(
+                obstacle_shapes[end],
+                i - 1,
+                CoordsToPixel(point, params),
+            )
+        end
+        sfConvexShape_setFillColor(
+            obstacle_shapes[end],
+            sfColor_fromRGB(66, 135, 245),
+        )
+        sfConvexShape_setOutlineColor(
+            obstacle_shapes[end],
+            sfColor_fromRGB(5, 96, 242),
+        )
+        sfConvexShape_setOutlineThickness(obstacle_shapes[end], 2)
+    end
+
+
     # println("ITERATION $i")
     sfRenderWindow_clear(window, sfColor_fromRGBA(255, 255, 255, 1))
+    for obst in obstacle_shapes
+        sfRenderWindow_drawConvexShape(window, obst, C_NULL)
+    end
     update_edges(edges, tree)
 
     # Get mouse position
@@ -234,13 +287,15 @@ while Bool(sfRenderWindow_isOpen(window))
         sfRenderWindow_drawCircleShape(window, circ, C_NULL)
     end
     sfRenderWindow_drawCircleShape(window, root_node_marker, C_NULL)
-    for obst in obstacle_shapes
-        sfRenderWindow_drawConvexShape(window, obst, C_NULL)
-    end
+
     sfRenderWindow_display(window)
     global i += 1
     for circ in path_circles
         sfCircleShape_destroy(circ)
+    end
+
+    for obst in obstacle_shapes
+        sfConvexShape_destroy(obst)
     end
 end
 
